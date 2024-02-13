@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -23,12 +24,9 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-const (
-	subCmdPath = "./sub"
-)
-
 var (
-	p = flag.Bool("p", false, "whether to use stdio or os.Pipe")
+	p          = flag.Bool("p", false, "whether to use stdio or os.Pipe")
+	subCmdPath = flag.String("c", "./sub", "path to built sub command")
 )
 
 func main() {
@@ -39,7 +37,7 @@ func main() {
 
 	cmdCtx, cmdCancel := context.WithCancel(ctx)
 	defer cmdCancel()
-	cmd := subCmd(cmdCtx, *p)
+	cmd := subCmd(cmdCtx, *subCmdPath, *p)
 	stderr, _ := cmd.StderrPipe()
 
 	var (
@@ -136,7 +134,12 @@ func main() {
 	}
 	fmt.Printf("closed\n")
 
-	err = cmd.Process.Signal(syscall.SIGTERM)
+	if runtime.GOOS == "windows" {
+		// I'm not sure why but sending SIGTERM on the process blocks long on Windows.
+		err = cmd.Process.Kill()
+	} else {
+		err = cmd.Process.Signal(syscall.SIGTERM)
+	}
 	if err != nil {
 		panic(err)
 	}
@@ -152,10 +155,10 @@ func must[V any](v V, err error) V {
 	return v
 }
 
-func subCmd(ctx context.Context, usePipe bool) *exec.Cmd {
+func subCmd(ctx context.Context, cmdPath string, usePipe bool) *exec.Cmd {
 	args := []string{}
 	if usePipe {
 		args = append(args, []string{"-r", "3", "-w", "4"}...)
 	}
-	return exec.CommandContext(ctx, subCmdPath, args...)
+	return exec.CommandContext(ctx, cmdPath, args...)
 }
